@@ -32,6 +32,8 @@ class RotateCorner(QtGui.QGraphicsPixmapItem):
         return RotateCorner.Type
 
     def boundingRect(self):
+        if not self.parent.selected:
+            return QtCore.QRectF()
         self.scale = self.parent.scale()
         if self.scale < 0.1:
             self.scale = 0.1
@@ -60,6 +62,7 @@ class RotateCorner(QtGui.QGraphicsPixmapItem):
 
     def mouseMoveEvent(self, event):
         #
+        # When "init", use scene position.
         if self.init:
             self.init = False
             pos_x = self.parent.scenePos().x()
@@ -67,11 +70,14 @@ class RotateCorner(QtGui.QGraphicsPixmapItem):
         else:
             pos_x = self.x()
             pos_y = self.y()
+        #
+        # Will return to this position.
+        self.new_pos = self.parent.scenePos()
+        # Center X and Center Y.
         cntr_x = self.parent.x() + self.parent.pixmap().width()/2
         cntr_y = self.parent.y() + self.parent.pixmap().height()/2
         hypotenuse = math.sqrt( (pos_x-cntr_x) ** 2 + (pos_y-cntr_y) ** 2 )
         radius = self.parent.radius
-        self.new_pos = self.parent.scenePos()
         # Use parent scale.
         scale = self.parent.scale()
         #
@@ -81,13 +87,16 @@ class RotateCorner(QtGui.QGraphicsPixmapItem):
             self.parent.real_rot = math.pi - math.asin(sin_a)
         else:
             sin_a = (cntr_y-pos_y) / hypotenuse
-            rot = math.degrees( math.asin(sin_a) ) + self.parent.norm_angle - 90
-            self.parent.real_rot = 2 * math.pi - math.asin(sin_a)
+            rot = math.degrees( math.asin(sin_a) ) + self.parent.norm_angle + 270
+            self.parent.real_rot = 2.0 * math.pi - math.asin(sin_a)
         #
+        rot = rot % 360
         self.update()
         if event:
             super(RotateCorner, self).mouseMoveEvent(event)
+        # Set parent new rotation.
         self.parent.setRotation(rot)
+        # Set left corner position.
         self.parent.lCorner.setPos(
             cntr_x+scale*radius*math.cos(self.parent.real_rot),
             cntr_y-scale*radius*math.sin(self.parent.real_rot)
@@ -111,6 +120,8 @@ class ScaleCorner(QtGui.QGraphicsPixmapItem):
         return ScaleCorner.Type
 
     def boundingRect(self):
+        if not self.parent.selected:
+            return QtCore.QRectF()
         self.scale = self.parent.scale()
         if self.scale < 0.1:
             self.scale = 0.1
@@ -124,7 +135,7 @@ class ScaleCorner(QtGui.QGraphicsPixmapItem):
     def paint(self, painter, option, widget):
         if not self.parent.selected:
             self.setActive(False)
-            return    
+            return
         painter.setPen(QtCore.Qt.NoPen)
         painter.setBrush(QtCore.Qt.darkGray)
         painter.drawRect(-7*self.scale, -7*self.scale, 18.0*self.scale, 18.0*self.scale)
@@ -153,30 +164,28 @@ class ScaleCorner(QtGui.QGraphicsPixmapItem):
         self.update()
         if event:
             super(ScaleCorner, self).mouseMoveEvent(event)
+        # Set parent new scale.
         self.parent.setScale(self.scale)
-        self.parent.rCorner.setPos(
-            cntr_x-self.scale*radius*math.cos(self.parent.real_rot),
-            cntr_y+self.scale*radius*math.sin(self.parent.real_rot)
-            )
+        # Set left corner position.
+        self.parent.rCorner.setPos(self.parent.scenePos())
         #
 
 
 class Img(QtGui.QGraphicsPixmapItem):
     Type = QtGui.QGraphicsItem.UserType + 1
 
-    def __init__(self, parent, position, rotation, scale, name, pixmap):
-        super(Img, self).__init__()
+    def __init__(self, parent, scene, position, rotation, scale, name, pixmap):
+        super(Img, self).__init__(pixmap, None, scene)
 
         self.parent = parent
         self.name = name
         self.selected = False
-        self.setPixmap(pixmap)
         self.radius = math.sqrt( (self.pixmap().width()/2.0) ** 2 + (self.pixmap().height()/2.0) ** 2 )
         self.norm_angle = math.degrees( math.asin(self.pixmap().width()/2.0 / self.radius) )
 
-        self.setPos(position[0], position[1])
         self.setScale(scale)
         self.setRotation(rotation)
+        self.setPos(position[0], position[1])
 
         self.setTransformOriginPoint(pixmap.width()/2.0, pixmap.height()/2.0)
         self.setFlag(QtGui.QGraphicsItem.ItemIsMovable)
@@ -200,7 +209,7 @@ class Img(QtGui.QGraphicsPixmapItem):
         pixmap = self.pixmap()
         painter.drawPixmap(pixmap.rect(), pixmap)
         if self.selected:
-            painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 2, QtCore.Qt.SolidLine))
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 3, QtCore.Qt.DotLine))
             painter.drawRoundedRect(-5, -5, pixmap.width()+10, pixmap.height()+10, 5, 5)
         else:
             painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 33), 2, QtCore.Qt.SolidLine))
@@ -234,10 +243,8 @@ class GraphWidget(QtGui.QGraphicsView):
     def __init__(self):
         super(GraphWidget, self).__init__()
 
-        self.setWindowTitle("Elastic Nodes")
+        self.setWindowTitle('Gnome Presentation')
         self.setMinimumSize(600, 600)
-        self.scale(0.9, 0.9)
-        self.currentItem = 0
 
         scene = QtGui.QGraphicsScene(self)
         scene.setSceneRect(0, 0, 5000, 5000)
@@ -252,12 +259,12 @@ class GraphWidget(QtGui.QGraphicsView):
 
         items_json = json.load(open('prez1.prez'))
         self.items_dict = {}
+        self.circ_items = []
 
         for k in items_json:
             d = items_json[k]
-            itm = Img(self, d['pos'], d['rotation'], d['scale'], k, QtGui.QPixmap(d['path']))
+            itm = Img(self, scene, d['pos'], d['rotation'], d['scale'], k, QtGui.QPixmap(d['path']))
             self.items_dict[k] = itm
-            scene.addItem(itm)
             scene.addItem(itm.rCorner)
             scene.addItem(itm.lCorner)
 
@@ -269,12 +276,14 @@ class GraphWidget(QtGui.QGraphicsView):
             self.scaleView(1.2)
         elif key == QtCore.Qt.Key_Minus:
             self.scaleView(1 / 1.2)
-        elif key == QtCore.Qt.Key_Space or key == QtCore.Qt.Key_Enter:
-            items = self.scene().items()
-            if self.currentItem >= len(items):
-                self.currentItem = 0
-            self.centerOn(items[self.currentItem])
-            self.currentItem += 3
+        elif key == QtCore.Qt.Key_Space or key == QtCore.Qt.Key_Enter or key == QtCore.Qt.Key_N:
+            if not self.circ_items:
+                self.circ_items = self.items_dict.values()
+            self.centerOn(self.circ_items.pop())
+        elif key == QtCore.Qt.Key_P:
+            if not self.circ_items:
+                self.circ_items = self.items_dict.values()
+            self.centerOn(self.circ_items.pop(0))
         else:
             super(GraphWidget, self).keyPressEvent(event)
         #
