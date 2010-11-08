@@ -7,9 +7,13 @@
 # ---
 
 
-import json
+import os, sys
 import math
+import time
+import json
+import binascii
 from PyQt4 import QtCore, QtGui
+from PyQt4.QtCore import *
 
 
 class RotateCorner(QtGui.QGraphicsPixmapItem):
@@ -22,7 +26,7 @@ class RotateCorner(QtGui.QGraphicsPixmapItem):
         self.parent = parent
         self.scale = self.parent.scale()
 
-        self.setPos(position[0], position[1])
+        self.setPos(position)
         self.setZValue(self.parent.zValue())
         self.setFlag(QtGui.QGraphicsItem.ItemIsMovable)
         self.setFlag(QtGui.QGraphicsItem.ItemSendsGeometryChanges)
@@ -33,11 +37,11 @@ class RotateCorner(QtGui.QGraphicsPixmapItem):
 
     def boundingRect(self):
         if not self.parent.selected:
-            return QtCore.QRectF()
+            return QRectF()
         self.scale = self.parent.scale()
         if self.scale < 0.1:
             self.scale = 0.1
-        return QtCore.QRectF(-8.0*self.scale, -8.0*self.scale, 25.0*self.scale, 25.0*self.scale)
+        return QRectF(-8.0*self.scale, -8.0*self.scale, 25.0*self.scale, 25.0*self.scale)
 
     def shape(self):
         path = QtGui.QPainterPath()
@@ -49,10 +53,10 @@ class RotateCorner(QtGui.QGraphicsPixmapItem):
             self.setActive(False)
             return
         self.setActive(True)
-        painter.setPen(QtCore.Qt.NoPen)
-        painter.setBrush(QtCore.Qt.darkGray)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(Qt.darkGray)
         painter.drawEllipse(-7*self.scale, -7*self.scale, 18.0*self.scale, 18.0*self.scale)
-        painter.setPen(QtGui.QPen(QtCore.Qt.black, self.scale))
+        painter.setPen(QtGui.QPen(Qt.black, self.scale))
         painter.drawEllipse(-7*self.scale, -7*self.scale, 18.0*self.scale, 18.0*self.scale)
 
     def mouseReleaseEvent(self, event):
@@ -121,11 +125,11 @@ class ScaleCorner(QtGui.QGraphicsPixmapItem):
 
     def boundingRect(self):
         if not self.parent.selected:
-            return QtCore.QRectF()
+            return QRectF()
         self.scale = self.parent.scale()
         if self.scale < 0.1:
             self.scale = 0.1
-        return QtCore.QRectF(-8.0*self.scale, -8.0*self.scale, 25.0*self.scale, 25.0*self.scale)
+        return QRectF(-8.0*self.scale, -8.0*self.scale, 25.0*self.scale, 25.0*self.scale)
 
     def shape(self):
         path = QtGui.QPainterPath()
@@ -136,10 +140,10 @@ class ScaleCorner(QtGui.QGraphicsPixmapItem):
         if not self.parent.selected:
             self.setActive(False)
             return
-        painter.setPen(QtCore.Qt.NoPen)
-        painter.setBrush(QtCore.Qt.darkGray)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(Qt.darkGray)
         painter.drawRect(-7*self.scale, -7*self.scale, 18.0*self.scale, 18.0*self.scale)
-        painter.setPen(QtGui.QPen(QtCore.Qt.black, self.scale))
+        painter.setPen(QtGui.QPen(Qt.black, self.scale))
         painter.drawRect(-7*self.scale, -7*self.scale, 18.0*self.scale, 18.0*self.scale)
 
     def mouseReleaseEvent(self, event):
@@ -185,7 +189,7 @@ class Img(QtGui.QGraphicsPixmapItem):
 
         self.setScale(scale)
         self.setRotation(rotation)
-        self.setPos(position[0], position[1])
+        self.setPos(position)
 
         self.setTransformOriginPoint(pixmap.width()/2.0, pixmap.height()/2.0)
         self.setFlag(QtGui.QGraphicsItem.ItemIsMovable)
@@ -203,16 +207,16 @@ class Img(QtGui.QGraphicsPixmapItem):
 
     def boundingRect(self):
         pixmap = self.pixmap()
-        return QtCore.QRectF(-10, -10, pixmap.width()+15, pixmap.height()+15)
+        return QRectF(-10, -10, pixmap.width()+15, pixmap.height()+15)
 
     def paint(self, painter, option, widget):
         pixmap = self.pixmap()
         painter.drawPixmap(pixmap.rect(), pixmap)
         if self.selected:
-            painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 3, QtCore.Qt.DotLine))
+            painter.setPen(QtGui.QPen(QtGui.QColor(255, 0, 0), 3, Qt.DotLine))
             painter.drawRoundedRect(-5, -5, pixmap.width()+10, pixmap.height()+10, 5, 5)
         else:
-            painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 33), 2, QtCore.Qt.SolidLine))
+            painter.setPen(QtGui.QPen(QtGui.QColor(0, 0, 33), 2, Qt.SolidLine))
             painter.drawRoundedRect(-5, -5, pixmap.width()+10, pixmap.height()+10, 5, 5)
 
     def mousePressEvent(self, event):
@@ -252,38 +256,83 @@ class GraphWidget(QtGui.QGraphicsView):
         self.setCacheMode(QtGui.QGraphicsView.CacheBackground)
         self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
         self.setViewportUpdateMode(QtGui.QGraphicsView.SmartViewportUpdate)
-        self.setRenderHint(QtGui.QPainter.Antialiasing)
+        self.setRenderHints(QtGui.QPainter.Antialiasing | QtGui.QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QtGui.QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QtGui.QGraphicsView.AnchorUnderMouse)
         self.setScene(scene)
 
+        # Load presentation file. It's a plain JSON file.
         items_json = json.load(open('prez1.prez'))
+        # Save all item pointers in a dictionary.
         self.items_dict = {}
+        # List used for circling items when pressing Space or Return.
         self.circ_items = []
+        # First item is currently None.
+        self.currentItem = None
+        # Trajectory bewteen current item and next item.
+        self.trajectoryLine = QLineF()
+        # TimeLine for smooth moving to next item.
+        self.smoothMoveTimer = QTimeLine(2000, self)
+        self.smoothMoveTimer.setFrameRange(0, 1)
+        self.smoothMoveTimer.setEasingCurve(QEasingCurve.OutQuart)
+        self.smoothMoveTimer.valueChanged.connect(self.smoothMove)
 
         for k in items_json:
+            #
             d = items_json[k]
-            itm = Img(self, scene, d['pos'], d['rotation'], d['scale'], k, QtGui.QPixmap(d['path']))
+            if d['path'] and os.path.exists(d['path']):
+                pixmap = QtGui.QPixmap(d['path'])
+            else:
+                pixmap = QtGui.QPixmap()
+                if d['data']:
+                    pixmap.loadFromData(binascii.a2b_base64(d['data']))
+            #
+            itm = Img(self, scene, QPointF(d['pos'][0], d['pos'][1]), d['rotation'], d['scale'], k, pixmap)
             self.items_dict[k] = itm
             scene.addItem(itm.rCorner)
             scene.addItem(itm.lCorner)
+            #
+
+    def smoothMove(self, value):
+        #
+        pos = self.trajectoryLine.pointAt(value)
+        rect = QRectF(pos, self.currentItem.boundingRect().size())
+        self.fitInView(rect, Qt.KeepAspectRatio)
+        #
+        if value == 1.0:
+            self.update()
+            self.smoothMoveTimer.stop()
+        #
 
     def keyPressEvent(self, event):
         #
         key = event.key()
-        #
-        if key == QtCore.Qt.Key_Plus:
+
+        if key == Qt.Key_Plus:
             self.scaleView(1.2)
-        elif key == QtCore.Qt.Key_Minus:
+
+        elif key == Qt.Key_Minus:
             self.scaleView(1 / 1.2)
-        elif key == QtCore.Qt.Key_Space or key == QtCore.Qt.Key_Enter or key == QtCore.Qt.Key_N:
+
+        elif key == Qt.Key_Space or key == Qt.Key_Enter:
+            #
+            if self.smoothMoveTimer.state() == QTimeLine.Running:
+                return
+            #
             if not self.circ_items:
-                self.circ_items = self.items_dict.values()
-            self.centerOn(self.circ_items.pop())
-        elif key == QtCore.Qt.Key_P:
-            if not self.circ_items:
-                self.circ_items = self.items_dict.values()
-            self.centerOn(self.circ_items.pop(0))
+                self.circ_items = [self.items_dict[k] for k in sorted(self.items_dict.keys(),reverse=True)]
+            # Pop one item from items list.
+            item = self.circ_items.pop()
+            if not self.currentItem:
+                self.currentItem = item
+                self.centerOn(item)
+                self.fitInView(item, Qt.KeepAspectRatio)
+            else:
+                self.trajectoryLine = QLineF(self.currentItem.scenePos(), item.scenePos())
+                self.currentItem = item
+                self.smoothMoveTimer.start()
+            #
+
         else:
             super(GraphWidget, self).keyPressEvent(event)
         #
@@ -296,15 +345,15 @@ class GraphWidget(QtGui.QGraphicsView):
         sceneRect = self.sceneRect()
         # Fill.
         gradient = QtGui.QLinearGradient(sceneRect.topLeft(), sceneRect.bottomRight())
-        gradient.setColorAt(0, QtCore.Qt.white)
-        gradient.setColorAt(1, QtCore.Qt.lightGray)
+        gradient.setColorAt(0, Qt.white)
+        gradient.setColorAt(1, Qt.lightGray)
         painter.fillRect(rect.intersect(sceneRect), QtGui.QBrush(gradient))
-        painter.setBrush(QtCore.Qt.NoBrush)
+        painter.setBrush(Qt.NoBrush)
         painter.drawRect(sceneRect)
         #
 
     def scaleView(self, scaleFactor):
-        factor = self.matrix().scale(scaleFactor, scaleFactor).mapRect(QtCore.QRectF(0, 0, 1, 1)).width()
+        factor = self.matrix().scale(scaleFactor, scaleFactor).mapRect(QRectF(0, 0, 1, 1)).width()
         if factor < 0.03 or factor > 40:
             return
         self.scale(scaleFactor, scaleFactor)
@@ -324,7 +373,6 @@ class GraphWidget(QtGui.QGraphicsView):
 
 if __name__ == '__main__':
 
-    import sys
     app = QtGui.QApplication(sys.argv)
     widget = GraphWidget()
     widget.show()
